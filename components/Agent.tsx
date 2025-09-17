@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation";
 
 import { cn } from "@/lib/utils";
 import { vapi } from "@/lib/vapi.sdk";
-import { interviewer, interviewGeneratorWorkflow } from "@/constants";
 import { createFeedback } from "@/lib/actions/general.action";
 
 enum CallStatus {
@@ -19,6 +18,15 @@ enum CallStatus {
 interface SavedMessage {
   role: "user" | "system" | "assistant";
   content: string;
+}
+
+interface AgentProps {
+  userName: string;
+  userId: string;
+  interviewId?: string;
+  feedbackId?: string;
+  type: "generate" | "feedback";
+  questions?: string[];
 }
 
 const Agent = ({
@@ -36,34 +44,16 @@ const Agent = ({
   const [lastMessage, setLastMessage] = useState<string>("");
 
   useEffect(() => {
-    const onCallStart = () => {
-      setCallStatus(CallStatus.ACTIVE);
-    };
-
-    const onCallEnd = () => {
-      setCallStatus(CallStatus.FINISHED);
-    };
-
-    const onMessage = (message: Message) => {
+    const onCallStart = () => setCallStatus(CallStatus.ACTIVE);
+    const onCallEnd = () => setCallStatus(CallStatus.FINISHED);
+    const onMessage = (message: any) => {
       if (message.type === "transcript" && message.transcriptType === "final") {
-        const newMessage = { role: message.role, content: message.transcript };
-        setMessages((prev) => [...prev, newMessage]);
+        setMessages((prev) => [...prev, { role: message.role, content: message.transcript }]);
       }
     };
-
-    const onSpeechStart = () => {
-      console.log("speech start");
-      setIsSpeaking(true);
-    };
-
-    const onSpeechEnd = () => {
-      console.log("speech end");
-      setIsSpeaking(false);
-    };
-
-    const onError = (error: Error) => {
-      console.log("Error:", error);
-    };
+    const onSpeechStart = () => setIsSpeaking(true);
+    const onSpeechEnd = () => setIsSpeaking(false);
+    const onError = (error: Error) => console.error("Vapi error:", error);
 
     vapi.on("call-start", onCallStart);
     vapi.on("call-end", onCallEnd);
@@ -83,91 +73,50 @@ const Agent = ({
   }, []);
 
   useEffect(() => {
-    if (messages.length > 0) {
-      setLastMessage(messages[messages.length - 1].content);
-    }
+    if (messages.length > 0) setLastMessage(messages[messages.length - 1].content);
 
-    const handleGenerateFeedback = async (messages: SavedMessage[]) => {
-      console.log("handleGenerateFeedback");
+    const handleGenerateFeedback = async () => {
+      if (!interviewId || !userId) return;
 
       const { success, feedbackId: id } = await createFeedback({
-        interviewId: interviewId!,
-        userId: userId!,
+        interviewId,
+        userId,
         transcript: messages,
         feedbackId,
       });
 
-      if (success && id) {
-        router.push(`/interview/${interviewId}/feedback`);
-      } else {
-        console.log("Error saving feedback");
-        router.push("/");
-      }
+      if (success && id) router.push(`/interview/${interviewId}/feedback`);
+      else router.push("/");
     };
 
     if (callStatus === CallStatus.FINISHED) {
-      if (type === "generate") {
-        router.push("/");
-      } else {
-        handleGenerateFeedback(messages);
-      }
+      if (type === "generate") router.push("/");
+      else handleGenerateFeedback();
     }
   }, [messages, callStatus, feedbackId, interviewId, router, type, userId]);
 
   const handleCall = async () => {
     setCallStatus(CallStatus.CONNECTING);
+
     try {
-      // Preflight: request mic permission explicitly so we can surface permission errors clearly
-      try {
-        await navigator.mediaDevices.getUserMedia({ audio: true });
-      } catch (micError) {
-        console.error("Microphone permission error:", micError);
+      const workflowId = process.env.NEXT_PUBLIC_VAPI_WORKFLOW_ID;
+      const webToken = process.env.NEXT_PUBLIC_VAPI_WEB_TOKEN;
+
+      if (!workflowId || !webToken) {
+        console.error("VAPI_WEB_TOKEN or VAPI_WORKFLOW_ID missing!");
         setCallStatus(CallStatus.INACTIVE);
         return;
       }
 
-      const webToken = process.env.NEXT_PUBLIC_VAPI_WEB_TOKEN;
-      const workflowId = process.env.NEXT_PUBLIC_VAPI_WORKFLOW_ID;
-      
-      console.log("Web Token:", webToken ? "Present" : "Missing");
-      console.log("Workflow ID:", workflowId ? "Present" : "Missing");
-      
-      if (type === "generate") {
-        if (!webToken) {
-          console.error("Missing NEXT_PUBLIC_VAPI_WEB_TOKEN");
-          setCallStatus(CallStatus.INACTIVE);
-          return;
-        }
-        if (!workflowId) {
-          console.error("Missing NEXT_PUBLIC_VAPI_WORKFLOW_ID");
-          setCallStatus(CallStatus.INACTIVE);
-          return;
-        }
+      const variableValues =
+        type === "generate"
+          ? { username: userName, userid: userId }
+          : { questions: questions?.map((q) => `- ${q}`).join("\n") ?? "" };
 
-        // Use your existing workflow
-        await vapi.start(workflowId, {
-          variableValues: {
-            username: userName,
-            userid: userId,
-          },
-        });
-      } else {
-        let formattedQuestions = "";
-        if (questions) {
-          formattedQuestions = questions
-            .map((question) => `- ${question}`)
-            .join("\n");
-        }
-
-        await vapi.start(interviewer, {
-          variableValues: {
-            questions: formattedQuestions,
-          },
-        });
-      }
-    } catch (error) {
-      console.error("Vapi start error:", error);
-      console.error("Error details:", error?.response?.data || error?.message || error);
+      await vapi.start(workflowId, { variableValues });
+      setCallStatus(CallStatus.ACTIVE);
+    } catch (err) {
+      console.error("Error starting Vapi workflow:", err);
       setCallStatus(CallStatus.INACTIVE);
     }
   };
@@ -183,13 +132,7 @@ const Agent = ({
         {/* AI Interviewer Card */}
         <div className="card-interviewer">
           <div className="avatar">
-            <Image
-              src="/ai-avatar.png"
-              alt="profile-image"
-              width={65}
-              height={54}
-              className="object-cover"
-            />
+            <Image src="/ai-avatar.png" alt="profile-image" width={65} height={54} className="object-cover" />
             {isSpeaking && <span className="animate-speak" />}
           </div>
           <h3>AI Interviewer</h3>
@@ -215,10 +158,7 @@ const Agent = ({
           <div className="transcript">
             <p
               key={lastMessage}
-              className={cn(
-                "transition-opacity duration-500 opacity-0",
-                "animate-fadeIn opacity-100"
-              )}
+              className={cn("transition-opacity duration-500 opacity-0", "animate-fadeIn opacity-100")}
             >
               {lastMessage}
             </p>
@@ -227,23 +167,15 @@ const Agent = ({
       )}
 
       <div className="w-full flex justify-center">
-        {callStatus !== "ACTIVE" ? (
-          <button className="relative btn-call" onClick={() => handleCall()}>
-            <span
-              className={cn(
-                "absolute animate-ping rounded-full opacity-75",
-                callStatus !== "CONNECTING" && "hidden"
-              )}
-            />
-
+        {callStatus !== CallStatus.ACTIVE ? (
+          <button className="relative btn-call" onClick={handleCall}>
+            <span className={cn("absolute animate-ping rounded-full opacity-75", callStatus !== CallStatus.CONNECTING && "hidden")} />
             <span className="relative">
-              {callStatus === "INACTIVE" || callStatus === "FINISHED"
-                ? "Call"
-                : ". . ."}
+              {callStatus === CallStatus.INACTIVE || callStatus === CallStatus.FINISHED ? "Call" : ". . ."}
             </span>
           </button>
         ) : (
-          <button className="btn-disconnect" onClick={() => handleDisconnect()}>
+          <button className="btn-disconnect" onClick={handleDisconnect}>
             End
           </button>
         )}
