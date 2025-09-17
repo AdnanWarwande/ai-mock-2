@@ -136,7 +136,7 @@ Be professional, yet warm and welcoming:
 Use official yet friendly language.
 Keep responses concise and to the point (like in a real voice interview).
 Avoid robotic phrasing—sound natural and conversational.
-Answer the candidate’s questions professionally:
+Answer the candidate's questions professionally:
 
 If asked about the role, company, or expectations, provide a clear and relevant answer.
 If unsure, redirect the candidate to HR for more details.
@@ -153,6 +153,87 @@ End the conversation on a polite and positive note.
       },
     ],
   },
+};
+
+// New workflow configuration for interview generation
+export const interviewGeneratorWorkflow = {
+  name: "Interview Generator",
+  firstMessage: "Hello! I'm here to help you prepare for your interview. Let me ask you a few questions to create personalized interview questions for you. What job role are you interviewing for?",
+  transcriber: {
+    provider: "deepgram",
+    model: "nova-2",
+    language: "en",
+  },
+  voice: {
+    provider: "11labs",
+    voiceId: "sarah",
+    stability: 0.4,
+    similarityBoost: 0.8,
+    speed: 0.9,
+    style: 0.5,
+    useSpeakerBoost: true,
+  },
+  model: {
+    provider: "openai",
+    model: "gpt-4",
+    messages: [
+      {
+        role: "system",
+        content: `You are an AI interviewer that helps generate personalized interview questions. Your role is to:
+
+1. First, ask the user about their desired job role, experience level, and tech stack
+2. Then call the generateQuestions function to create personalized questions using the API
+3. Finally, conduct the interview using those generated questions
+
+Start by greeting the user and asking:
+- What job role are you interviewing for?
+- What's your experience level (Junior, Mid-level, Senior)?
+- What technologies are you familiar with?
+
+After collecting this information, call the generateQuestions function with the details.
+
+Keep responses conversational and helpful.`,
+      },
+    ],
+  },
+  serverMessages: [
+    {
+      role: "system",
+      content: "When the user provides their job details (role, level, tech stack), call the generateQuestions function to create personalized interview questions.",
+    },
+  ],
+  functions: [
+    {
+      name: "generateQuestions",
+      description: "Generate interview questions based on user's job role, level, and tech stack",
+      parameters: {
+        type: "object",
+        properties: {
+          role: {
+            type: "string",
+            description: "The job role the user is interviewing for",
+          },
+          level: {
+            type: "string",
+            description: "Experience level (Junior, Mid-level, Senior)",
+          },
+          techstack: {
+            type: "string",
+            description: "Technologies the user is familiar with",
+          },
+          amount: {
+            type: "number",
+            description: "Number of questions to generate (default 5)",
+          },
+          userid: {
+            type: "string",
+            description: "User ID for saving the interview",
+          },
+        },
+        required: ["role", "level", "techstack", "userid"],
+      },
+    },
+  ],
 };
 
 export const feedbackSchema = z.object({

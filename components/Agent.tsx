@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 
 import { cn } from "@/lib/utils";
 import { vapi } from "@/lib/vapi.sdk";
-import { interviewer } from "@/constants";
+import { interviewer, interviewGeneratorWorkflow } from "@/constants";
 import { createFeedback } from "@/lib/actions/general.action";
 
 enum CallStatus {
@@ -116,27 +116,49 @@ const Agent = ({
 
   const handleCall = async () => {
     setCallStatus(CallStatus.CONNECTING);
-
-    if (type === "generate") {
-      await vapi.start(process.env.NEXT_PUBLIC_VAPI_WORKFLOW_ID!, {
-        variableValues: {
-          username: userName,
-          userid: userId,
-        },
-      });
-    } else {
-      let formattedQuestions = "";
-      if (questions) {
-        formattedQuestions = questions
-          .map((question) => `- ${question}`)
-          .join("\n");
+    try {
+      // Preflight: request mic permission explicitly so we can surface permission errors clearly
+      try {
+        await navigator.mediaDevices.getUserMedia({ audio: true });
+      } catch (micError) {
+        console.error("Microphone permission error:", micError);
+        setCallStatus(CallStatus.INACTIVE);
+        return;
       }
 
-      await vapi.start(interviewer, {
-        variableValues: {
-          questions: formattedQuestions,
-        },
-      });
+      const hasWebToken = Boolean(process.env.NEXT_PUBLIC_VAPI_WEB_TOKEN);
+      if (type === "generate") {
+        if (!hasWebToken) {
+          console.error("Missing NEXT_PUBLIC_VAPI_WEB_TOKEN");
+          setCallStatus(CallStatus.INACTIVE);
+          return;
+        }
+
+        // Use your existing workflow
+        await vapi.start(process.env.NEXT_PUBLIC_VAPI_WORKFLOW_ID!, {
+          variableValues: {
+            username: userName,
+            userid: userId,
+          },
+        });
+      } else {
+        let formattedQuestions = "";
+        if (questions) {
+          formattedQuestions = questions
+            .map((question) => `- ${question}`)
+            .join("\n");
+        }
+
+        await vapi.start(interviewer, {
+          variableValues: {
+            questions: formattedQuestions,
+          },
+        });
+      }
+    } catch (error) {
+      console.error("Vapi start error:", error);
+      console.error("Error details:", error?.response?.data || error?.message || error);
+      setCallStatus(CallStatus.INACTIVE);
     }
   };
 
