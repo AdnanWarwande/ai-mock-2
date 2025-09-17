@@ -1,102 +1,60 @@
-import { generateText } from "ai";
-import { google } from "@ai-sdk/google";
-
 import { db } from "@/firebase/admin";
 import { getRandomInterviewCover } from "@/lib/utils";
 
+const VAPI_WEB_TOKEN = process.env.NEXT_PUBLIC_VAPI_WEB_TOKEN;
+const VAPI_WORKFLOW_ID = process.env.NEXT_PUBLIC_VAPI_WORKFLOW_ID;
+
 export async function POST(request: Request) {
-  const body = await request.json();
-  
-  // Handle Vapi function calls
-  if (body.functionCall) {
-    const { name, parameters } = body.functionCall;
-    
-    if (name === "generateQuestions") {
-      const { role, level, techstack, amount = 5, userid } = parameters;
-      
-      try {
-        const { text: questions } = await generateText({
-          model: google("gemini-1.5-flash"),
-          prompt: `Prepare questions for a job interview.
-            Role: ${role}
-            Level: ${level}
-            Tech stack: ${techstack}
-            Amount: ${amount}
-            Focus: technical
-            Format: ["Question 1", "Question 2"]`,
-        });
+  const { type, role, level, techstack, amount = 5, userid } = await request.json();
 
-        const interview = {
-          role,
-          type: "Technical",
-          level,
-          techstack: techstack.split(","),
-          questions: JSON.parse(questions),
-          userId: userid,
-          finalized: true,
-          coverImage: getRandomInterviewCover(),
-          createdAt: new Date().toISOString(),
-        };
-
-        const docRef = await db.collection("interviews").add(interview);
-
-        return Response.json({
-          success: true,
-          questions: JSON.parse(questions),
-          interviewId: docRef.id
-        }, { status: 200 });
-      } catch (error) {
-        console.error("Error generating questions:", error);
-        return Response.json({
-          success: false,
-          error: "Failed to generate questions"
-        }, { status: 500 });
-      }
-    }
+  if (!VAPI_WEB_TOKEN || !VAPI_WORKFLOW_ID) {
+    console.error("Missing VAPI_WEB_TOKEN or VAPI_WORKFLOW_ID in environment variables");
+    return Response.json({ success: false, error: "Vapi credentials not configured" }, { status: 500 });
   }
 
-  // Handle legacy direct API calls
-  const { type, role, level, techstack, amount, userid } = body;
-
   try {
-    const { text: questions } = await generateText({
-      model: google("gemini-1.5-flash"),
-      prompt: `Prepare questions for a job interview.
-        The job role is ${role}.
-        The job experience level is ${level}.
-        The tech stack used in the job is: ${techstack}.
-        The focus between behavioural and technical questions should lean towards: ${type}.
-        The amount of questions required is: ${amount}.
-        Please return only the questions, without any additional text.
-        The questions are going to be read by a voice assistant so do not use "/" or "*" or any other special characters which might break the voice assistant.
-        Return the questions formatted like this:
-        ["Question 1", "Question 2", "Question 3"]
-        
-        Thank you! <3
-    `,
+    // Call Vapi workflow
+    const vapiResponse = await fetch("https://api.vapi.ai/call/web", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${VAPI_WEB_TOKEN}`,
+      },
+      body: JSON.stringify({
+        workflowId: VAPI_WORKFLOW_ID,
+        input: { type, role, level, techstack, amount, userid },
+      }),
     });
 
+    const vapiData = await vapiResponse.json();
+
+    if (!vapiResponse.ok) {
+      console.error("Vapi error:", vapiData);
+      return Response.json({ success: false, error: vapiData }, { status: vapiResponse.status });
+    }
+
+    // Store interview in Firebase
     const interview = {
-      role: role,
-      type: type,
-      level: level,
+      role,
+      type,
+      level,
       techstack: techstack.split(","),
-      questions: JSON.parse(questions),
+      questions: vapiData?.output?.questions || [], // adjust according to your workflow output
       userId: userid,
       finalized: true,
       coverImage: getRandomInterviewCover(),
       createdAt: new Date().toISOString(),
     };
 
-    await db.collection("interviews").add(interview);
+    const docRef = await db.collection("interviews").add(interview);
 
-    return Response.json({ success: true }, { status: 200 });
+    return Response.json({ success: true, interviewId: docRef.id, data: vapiData }, { status: 200 });
   } catch (error) {
-    console.error("Error:", error);
-    return Response.json({ success: false, error: error }, { status: 500 });
+    console.error("Error calling Vapi workflow:", error);
+    return Response.json({ success: false, error }, { status: 500 });
   }
 }
 
 export async function GET() {
-  return Response.json({ success: true, data: "Thank you!" }, { status: 200 });
+  return Response.json({ success: true, data: "API is working!" }, { status: 200 });
 }
