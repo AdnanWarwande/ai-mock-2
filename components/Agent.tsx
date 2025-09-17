@@ -126,16 +126,26 @@ const Agent = ({
         return;
       }
 
-      const hasWebToken = Boolean(process.env.NEXT_PUBLIC_VAPI_WEB_TOKEN);
+      const webToken = process.env.NEXT_PUBLIC_VAPI_WEB_TOKEN;
+      const workflowId = process.env.NEXT_PUBLIC_VAPI_WORKFLOW_ID;
+      
+      console.log("Web Token:", webToken ? "Present" : "Missing");
+      console.log("Workflow ID:", workflowId ? "Present" : "Missing");
+      
       if (type === "generate") {
-        if (!hasWebToken) {
+        if (!webToken) {
           console.error("Missing NEXT_PUBLIC_VAPI_WEB_TOKEN");
+          setCallStatus(CallStatus.INACTIVE);
+          return;
+        }
+        if (!workflowId) {
+          console.error("Missing NEXT_PUBLIC_VAPI_WORKFLOW_ID");
           setCallStatus(CallStatus.INACTIVE);
           return;
         }
 
         // Use your existing workflow
-        await vapi.start(process.env.NEXT_PUBLIC_VAPI_WORKFLOW_ID!, {
+        await vapi.start(workflowId, {
           variableValues: {
             username: userName,
             userid: userId,
