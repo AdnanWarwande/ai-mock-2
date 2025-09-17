@@ -3,6 +3,7 @@
     <a href="https://www.youtube.com/watch?v=8GK8R77Bd7g" target="_blank">
       <img src="https://github.com/user-attachments/assets/1c0131c7-9f2d-4e3b-b47c-9679e76d8f9a" alt="Project Banner">
       <p>just wated to redeploy so making this changes</p>
+            <p>just wated to redeploy so making this changes</p>
     </a>
   <br />
   
